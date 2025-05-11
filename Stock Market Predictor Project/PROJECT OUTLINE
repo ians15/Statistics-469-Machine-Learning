@@ -1,0 +1,41 @@
+This project builds and evaluates an LSTM (Long Short-Term Memory) model to predict future stock prices based on historical closing values. The model is trained on stock data retrieved from Yahoo Finance and explores the effect of key tuning parameters. Final results are visualized and deployed via a Streamlit web app.
+1. Project Overview:
+Retrieves historical stock closing prices using the yfinance API
+Preprocesses the data by normalizing with MinMaxScaler
+Creates 60-day rolling windows to build input sequences for the LSTM
+Trains an LSTM neural network using TensorFlow/Keras
+Performs parameter tuning (learning rate, batch size, number of layers)
+Forecasts 30 future trading days based on the latest known data
+Evaluates model performance using Root Mean Squared Error (RMSE)
+Visualizes results using Matplotlib
+2.Workflow:
+-Data Collection:
+Pull stock data using yfinance for tickers like KO, COST, etc.
+-Preprocessing
+Drop missing values
+Normalize closing prices between 0 and 1
+Create training sequences with a 60-day lookback window
+-Model Building
+Build a 2- or 3-layer LSTM model using Sequential API
+Use Dropout to reduce overfitting
+Compile the model with Adam optimizer and Huber loss
+-Training
+Train the model on 80% of data, validate on 10%
+Use EarlyStopping to avoid overtraining
+Default settings: learning rate = 0.001, batch size = 32, epochs = 50
+-Parameter Tuning
+Lowered learning rate to 0.0005 → model underfit and RMSE increased
+Increased batch size to 64 → faster convergence but less accurate
+Added a third LSTM layer → model complexity increased but RMSE worsened
+-Prediction
+Used the last 60 days of data to generate rolling forecasts for the next 30 trading days
+Each predicted value was appended and used in the next input window
+-Evaluation
+Compared predicted vs. actual prices
+Calculated RMSE as the performance metric
+Visualized results for different parameter settings
+-Deployment
+Created a Streamlit dashboard to showcase:
+Historical price trends
+Forecasted prices
+RMSE comparison charts for different tuning setups
