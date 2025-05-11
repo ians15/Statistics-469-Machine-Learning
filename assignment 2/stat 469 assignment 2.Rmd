@@ -1,0 +1,215 @@
+---
+title: "Stat 469 Assignment 2"
+author: "Ian Sam"
+date: "2025-02-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(MASS)
+library(ggplot2)
+library(dplyr)
+library(rpart)
+library(glmnet)
+
+set.seed(0)
+
+# Load the HIV dataset
+data("HIV")
+XX  
+YY 
+
+cutoffs <- c(2, 3, 3, 1.5, 1.5)
+
+# Convert continuous outcomes to binary outcomes (1 = resistant, 0 = non-resistant)
+yBin <- as.matrix(YY)
+for (ii in 1:5) {
+  yBin[, ii] <- (10^yBin[, ii] < cutoffs[ii]) * 1
+}
+
+# Define the number of folds and repetitions for cross-validation
+n_folds <- 5
+n_repeats <- 50
+
+# Create a matrix to store fold indices for each repetition
+# Each row corresponds to a repetition, and each column corresponds to a sample
+fold_indices <- matrix(NA, nrow = n_repeats, ncol = nrow(XX))
+
+# Generate stratified fold indices for each drug and repetition
+# Stratified sampling ensures that each fold has a similar proportion of resistant and non-resistant samples
+for (i in 1:n_repeats) {
+  for (drug in 1:5) {
+    drug_indices <- which(yBin[, drug] == 1)  # Indices of resistant samples
+    non_drug_indices <- which(yBin[, drug] == 0)  # Indices of non-resistant samples
+    
+    # Assign fold indices for resistant and non-resistant samples
+    fold_indices[i, drug_indices] <- sample(rep(1:n_folds, length.out = length(drug_indices)))
+    fold_indices[i, non_drug_indices] <- sample(rep(1:n_folds, length.out = length(non_drug_indices)))
+  }
+}
+
+# Function to calculate evaluation metrics (misclassification rate, precision, recall, F1 score)
+calculate_metrics <- function(actual, predicted) {
+  confusion_matrix <- table(actual, predicted)
+  TP <- confusion_matrix[2, 2]  # True Positives
+  TN <- confusion_matrix[1, 1]  # True Negatives
+  FP <- confusion_matrix[1, 2]  # False Positives
+  FN <- confusion_matrix[2, 1]  # False Negatives
+  
+  misclassification_rate <- (FP + FN) / (TP + TN + FP + FN)
+  precision <- TP / (TP + FP)
+  recall <- TP / (TP + FN)
+  f1_score <- 2 * (precision * recall) / (precision + recall)
+  
+  return(c(misclassification_rate, precision, recall, f1_score))
+}
+
+# List of drugs (columns in yBin)
+drugs <- colnames(yBin)
+
+# Initialize a list to store results for each drug
+results <- list()
+
+# Loop through each drug and perform cross-validation
+for (drug in 1:5) {
+  # Create a data frame with features (XX) and binary outcome for the current drug
+  drug_data <- data.frame(XX, binary_outcome = yBin[, drug])
+  
+  # Initialize a data frame to store metrics for each method
+  metrics <- data.frame(
+    method = character(),
+    misclassification_rate = numeric(),
+    precision = numeric(),
+    recall = numeric(),
+    f1_score = numeric(),
+    repetition = integer(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Loop through each repetition (50 repetitions)
+  for (rep in 1:n_repeats) {
+    folds <- fold_indices[rep, ]  # Get fold indices for the current repetition
+    
+    # Loop through each fold (5-fold cross-validation)
+    for (fold in 1:n_folds) {
+      # Split data into training and testing sets
+      train_data <- drug_data[folds != fold, ]  # Training data (4 folds)
+      test_data <- drug_data[folds == fold, ]   # Testing data (1 fold)
+      
+      # Logistic Regression
+      logit_model <- glm(binary_outcome ~ ., data = train_data, family = binomial, control = list(maxit = 100))
+      logit_pred <- ifelse(predict(logit_model, test_data, type = "response") > 0.5, 1, 0)
+      logit_metrics <- calculate_metrics(test_data$binary_outcome, logit_pred)
+      
+      # Linear Discriminant Analysis (LDA)
+      lda_model <- lda(binary_outcome ~ ., data = train_data)
+      lda_pred <- predict(lda_model, test_data)$class
+      lda_metrics <- calculate_metrics(test_data$binary_outcome, lda_pred)
+      
+      # Classification Tree
+      tree_model <- rpart(binary_outcome ~ ., data = train_data, method = "class")
+      tree_pred <- predict(tree_model, test_data, type = "class")
+      tree_metrics <- calculate_metrics(test_data$binary_outcome, tree_pred)
+      
+      # Elastic Net
+      enet_model <- cv.glmnet(as.matrix(train_data[, -ncol(train_data)]), train_data$binary_outcome, family = "binomial", alpha = 0.5)
+      enet_pred <- predict(enet_model, as.matrix(test_data[, -ncol(test_data)]), type = "response")
+      enet_pred <- ifelse(enet_pred > 0.5, 1, 0)
+      enet_metrics <- calculate_metrics(test_data$binary_outcome, enet_pred)
+      
+      # Store metrics for each method
+      metrics <- rbind(metrics, data.frame(
+        method = "Logistic Regression",
+        misclassification_rate = logit_metrics[1],
+        precision = logit_metrics[2],
+        recall = logit_metrics[3],
+        f1_score = logit_metrics[4],
+        repetition = rep
+      ))
+      
+      metrics <- rbind(metrics, data.frame(
+        method = "LDA",
+        misclassification_rate = lda_metrics[1],
+        precision = lda_metrics[2],
+        recall = lda_metrics[3],
+        f1_score = lda_metrics[4],
+        repetition = rep
+      ))
+      
+      metrics <- rbind(metrics, data.frame(
+        method = "Classification Tree",
+        misclassification_rate = tree_metrics[1],
+        precision = tree_metrics[2],
+        recall = tree_metrics[3],
+        f1_score = tree_metrics[4],
+        repetition = rep
+      ))
+      
+      metrics <- rbind(metrics, data.frame(
+        method = "Elastic Net",
+        misclassification_rate = enet_metrics[1],
+        precision = enet_metrics[2],
+        recall = enet_metrics[3],
+        f1_score = enet_metrics[4],
+        repetition = rep
+      ))
+    }
+  }
+  
+  # Store metrics for the current drug in the results list
+  results[[drugs[drug]]] <- metrics
+}
+
+# Function to summarize metrics (median values for each method)
+summarize_metrics <- function(metrics) {
+  metrics %>%
+    group_by(method) %>%
+    summarise(
+      misclassification_rate = median(misclassification_rate),
+      precision = median(precision),
+      recall = median(recall),
+      f1_score = median(f1_score)
+    )
+}
+
+# Print summary tables for each drug
+for (drug in drugs) {
+  cat("### Drug:", drug, "\n")
+  summary_table <- summarize_metrics(results[[drug]])
+  print(summary_table)
+  cat("\n\n")
+}
+
+# Plot boxplots of F1 scores for each drug
+for (drug in drugs) {
+  p <- ggplot(results[[drug]], aes(x = method, y = f1_score, fill = method)) +
+    geom_boxplot() +
+    labs(title = paste("F1 Scores for", drug), x = "Method", y = "F1 Score") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels 
+  print(p)
+}
+
+# Perform Wilcoxon tests to compare F1 scores of new methods with LDA
+for (drug in drugs) {
+  lda_f1 <- results[[drug]] %>% filter(method == "LDA") %>% pull(f1_score)
+  tree_f1 <- results[[drug]] %>% filter(method == "Classification Tree") %>% pull(f1_score)
+  enet_f1 <- results[[drug]] %>% filter(method == "Elastic Net") %>% pull(f1_score)
+  
+  # Compare LDA vs Classification Tree
+  wilcoxon_lda_vs_tree <- wilcox.test(lda_f1, tree_f1, paired = TRUE)
+  
+  # Compare LDA vs Elastic Net
+  wilcoxon_lda_vs_enet <- wilcox.test(lda_f1, enet_f1, paired = TRUE)
+  
+  # Print p-values
+  cat("Drug:", drug, "\n")
+  cat("LDA vs Classification Tree: p-value =", wilcoxon_lda_vs_tree$p.value, "\n")
+  cat("LDA vs Elastic Net: p-value =", wilcoxon_lda_vs_enet$p.value, "\n\n")
+}
+```
+

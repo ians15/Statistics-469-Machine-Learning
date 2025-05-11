@@ -1,0 +1,78 @@
+---
+title: 'Stat 354 Assignment #4'
+author: "Ian Sam"
+date: "2025-04-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r}
+library(tidyverse)    # Data manipulation
+library(caret)        # Machine learning (RF, SVM, etc.)
+library(xgboost)      # Gradient boosting (optional)
+library(Matrix)       # Handling sparse data
+
+```
+```{r}
+# Read training data (with labels)
+train_data <- train
+cell_types <- train_data$CellType  # Extract labels
+train_data <- train_data[, -which(colnames(train_data) %in% c("SampleID", "CellType"))]  # Remove metadata
+
+# Read test data (no labels)
+test_data <- test
+# Convert to sparse matrix (if needed)
+train_matrix <- Matrix(as.matrix(train_data), sparse = TRUE)
+
+# Log-normalize (Seurat-style)
+normalize_data <- function(mat) {
+  mat <- log1p(mat / rowSums(mat) * 1e4)  # Log(CP10K)
+  return(mat)
+}
+train_norm <- normalize_data(train_matrix)
+
+# Select Highly Variable Genes (HVGs) - adjust nfeatures as needed
+# Calculate gene variances
+gene_vars <- apply(train_norm, 2, var)
+hvg <- names(sort(gene_vars, decreasing = TRUE))[1:2000]
+train_hvg <- train_norm[, hvg]
+# PCA
+pca <- prcomp(train_hvg, scale. = TRUE)
+train_pca <- pca$x[, 1:50]  # Top 50 PCs
+
+# UMAP (for visualization)
+library(umap)
+umap_out <- umap(train_pca)
+plot(umap_out$layout, col = as.factor(cell_types), pch = 16)
+
+set.seed(123)
+rf_model <- train(
+  x = train_pca, 
+  y = as.factor(cell_types),
+  method = "rf",
+  trControl = trainControl(method = "cv", number = 5)
+)
+print(rf_model)  # Check cross-validation accuracy
+
+xgb_model <- train(
+  x = train_pca,
+  y = as.factor(cell_types),
+  method = "xgbTree",
+  trControl = trainControl(method = "cv", number = 5)
+)
+
+# Preprocess test data identically
+test_norm <- normalize_data(test_data)
+test_hvg <- test_norm[, hvg]  # Use same HVGs as training
+test_pca <- predict(pca, newdata = test_hvg)[, 1:50]
+
+# Predict labels
+test_preds <- predict(rf_model, newdata = test_pca)  # Or use xgb_model
+
+saveRDS(test_preds, file = "predicted_labels.rds")  # Strictly a vector, no extra info!
+```
+
